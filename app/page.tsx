@@ -1,44 +1,135 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, CircleHelp, Download, Headphones, Pause, Play, RotateCcw, Volume2, X } from 'lucide-react';
+import { ChevronRight, CircleHelp, Download, Headphones, Pause, Play, RotateCcw, Volume2, VolumeX, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { allBeats, courseBeats, famousBeats, type Beat, type CourseLevel, type Drum, type FamousLevel } from './beats';
+import { allBeats, courseBeats, famousBeats, type Beat, type Drum, type Level } from './beats';
 import './enhancements.css';
 
-const drumLabels: Record<Drum, string> = { hh: 'Hi-hat', snare: 'Snare', kick: 'Kick', tom: 'High tom' };
-const noteY: Record<Drum, number> = { hh: 18, tom: 35, snare: 53, kick: 79 };
-const courseLevels: CourseLevel[] = ['Beginner', 'Medium', 'Advanced'];
-const famousLevels: FamousLevel[] = ['Easy', 'Medium', 'Hard'];
+const drumLabels: Record<Drum, string> = { hh: 'Closed hi-hat', oh: 'Open hi-hat', snare: 'Snare', kick: 'Kick', tom: 'High tom' };
+const noteY: Record<Drum, number> = { hh: 18, oh: 18, tom: 35, snare: 53, kick: 79 };
+const levels: Level[] = ['Beginner', 'Intermediate', 'Advanced'];
 
-function Score({ beat, step, onScrub }: { beat: Beat; step: number; onScrub: (step: number) => void }) {
+type LoopRange = { start: number; end: number };
+
+function Score({
+  beat,
+  step,
+  muted,
+  loopRange,
+  onScrub,
+  onToggleMute,
+  onLoopChange,
+}: {
+  beat: Beat;
+  step: number;
+  muted: Record<Drum, boolean>;
+  loopRange: LoopRange | null;
+  onScrub: (step: number) => void;
+  onToggleMute: (drum: Drum) => void;
+  onLoopChange: (range: LoopRange | null) => void;
+}) {
   const notes = useMemo(() => Array.from({ length: 16 }, (_, index) => (Object.keys(beat.pattern) as Drum[]).filter((drum) => beat.pattern[drum][index])), [beat]);
+  const scoreRef = useRef<HTMLDivElement>(null);
+  const staffRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef<number | null>(null);
+  const dragMovedRef = useRef(false);
+
+  const indexFromPointer = (clientX: number) => {
+    const rect = staffRef.current?.getBoundingClientRect();
+    if (!rect) return 0;
+    return Math.max(0, Math.min(15, Math.floor(((clientX - rect.left) / rect.width) * 16)));
+  };
+
+  useEffect(() => {
+    const clearOutside = (event: PointerEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('[data-loop-safe="true"]')) return;
+      if (loopRange && scoreRef.current && !scoreRef.current.contains(target)) onLoopChange(null);
+    };
+    document.addEventListener('pointerdown', clearOutside);
+    return () => document.removeEventListener('pointerdown', clearOutside);
+  }, [loopRange, onLoopChange]);
+
+  const beginSelection = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    const index = indexFromPointer(event.clientX);
+    dragStartRef.current = index;
+    dragMovedRef.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onLoopChange({ start: index, end: index });
+  };
+
+  const moveSelection = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragStartRef.current === null || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const index = indexFromPointer(event.clientX);
+    dragMovedRef.current = dragMovedRef.current || index !== dragStartRef.current;
+    onLoopChange({ start: Math.min(dragStartRef.current, index), end: Math.max(dragStartRef.current, index) });
+  };
+
+  const finishSelection = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragStartRef.current === null) return;
+    const index = indexFromPointer(event.clientX);
+    if (!dragMovedRef.current) {
+      onLoopChange(null);
+      onScrub(index);
+    }
+    dragStartRef.current = null;
+    dragMovedRef.current = false;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
   return (
-    <div className="score" aria-label={`Drum notation for ${beat.title}`}>
+    <div className="score" ref={scoreRef} aria-label={'Drum notation for ' + beat.title}>
       <div className="score-meta"><span>Standard drum notation</span><span>4 / 4 · ♩ = {beat.bpm}</span></div>
+      <div className="track-mutes" aria-label="Mute individual drum tracks">
+        {(Object.keys(drumLabels) as Drum[]).map((drum) => (
+          <button className={'track-mute ' + (muted[drum] ? 'muted' : '')} key={drum} onClick={() => onToggleMute(drum)} aria-pressed={muted[drum]} title={(muted[drum] ? 'Unmute ' : 'Mute ') + drumLabels[drum]}>
+            {muted[drum] ? <VolumeX size={13} /> : <Volume2 size={13} />}<span>{drumLabels[drum]}</span>
+          </button>
+        ))}
+      </div>
       <div className="staff-wrap">
         <div className="staff-clef" aria-hidden="true">𝄥</div>
-        <div className="staff" role="group" aria-label="Scrubbable one-bar drum score">
-          {[20,35,50,65,80].map((top) => <span className="staff-line" style={{ top: `${top}%` }} key={top} />)}
+        <div
+          className="staff"
+          ref={staffRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="Drag to select a loop, or click to audition a slice"
+          aria-valuemin={1}
+          aria-valuemax={16}
+          aria-valuenow={Math.max(step + 1, 1)}
+          onPointerDown={beginSelection}
+          onPointerMove={moveSelection}
+          onPointerUp={finishSelection}
+          onPointerCancel={finishSelection}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowRight') onScrub(Math.min(15, Math.max(step, 0) + 1));
+            if (event.key === 'ArrowLeft') onScrub(Math.max(0, Math.max(step, 0) - 1));
+            if (event.key === 'Escape') onLoopChange(null);
+          }}
+        >
+          {[20,35,50,65,80].map((top) => <span className="staff-line" style={{ top: top + '%' }} key={top} />)}
+          {loopRange && <div className="loop-selection" style={{ left: (loopRange.start / 16) * 100 + '%', width: ((loopRange.end - loopRange.start + 1) / 16) * 100 + '%' }}><span>LOOP</span><button aria-label="Clear loop selection" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onLoopChange(null); }}><X size={12} /></button></div>}
           {notes.map((drums, index) => (
-            <div className={`beat-column ${step === index ? 'is-current' : ''}`} style={{ left: `${(index + 0.55) * 6.05}%` }} key={index}>
+            <div className={'beat-column ' + (step === index ? 'is-current ' : '') + (loopRange && index >= loopRange.start && index <= loopRange.end ? 'in-loop' : '')} style={{ left: (index + 0.55) * 6.05 + '%' }} key={index}>
               {index % 4 === 0 && <span className="beat-count">{index / 4 + 1}</span>}
-              {drums.map((drum) => <span className={`note note-${drum}`} style={{ top: `${noteY[drum]}%` }} key={drum} title={drumLabels[drum]}>{drum === 'hh' ? '×' : '●'}</span>)}
+              {drums.map((drum) => <span className={'note note-' + drum + (muted[drum] ? ' note-muted' : '')} style={{ top: noteY[drum] + '%' }} key={drum} title={drumLabels[drum]}>{drum === 'hh' ? '×' : drum === 'oh' ? '○' : '●'}</span>)}
               {index % 4 === 3 && index < 15 && <span className="measure-tick" />}
             </div>
           ))}
-          <input className="score-scrubber" aria-label="Scrub through beat notes" type="range" min="0" max="15" step="1" value={Math.max(step, 0)} onChange={(event) => onScrub(Number(event.target.value))} />
         </div>
       </div>
-      <div className="count-row" aria-hidden="true">{['1','e','&','a','2','e','&','a','3','e','&','a','4','e','&','a'].map((count, index) => <span key={`${count}-${index}`}>{count}</span>)}</div>
-      <p className="scrub-hint">Drag across the score to audition each slice</p>
+      <div className="count-row" aria-hidden="true">{['1','e','&','a','2','e','&','a','3','e','&','a','4','e','&','a'].map((count, index) => <span key={count + '-' + index}>{count}</span>)}</div>
+      <p className="scrub-hint">{loopRange ? 'Looping slices ' + (loopRange.start + 1) + '-' + (loopRange.end + 1) + ' · click × or outside the score to clear' : 'Click to audition · drag across the score to select a loop'}</p>
     </div>
   );
 }
 
 export default function Home() {
   const [collection, setCollection] = useState<'course' | 'famous'>('course');
-  const [level, setLevel] = useState<CourseLevel | FamousLevel>('Beginner');
+  const [level, setLevel] = useState<Level>('Beginner');
   const [selectedId, setSelectedId] = useState(courseBeats[0].id);
   const selectedBeat = allBeats.find((beat) => beat.id === selectedId) ?? courseBeats[0];
   const [bpm, setBpm] = useState(selectedBeat.bpm);
@@ -48,10 +139,12 @@ export default function Home() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [manualHit, setManualHit] = useState<Drum | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [muted, setMuted] = useState<Record<Drum, boolean>>({ hh: false, oh: false, snare: false, kick: false, tom: false });
+  const [loopRange, setLoopRange] = useState<LoopRange | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
 
   const visibleBeats = useMemo(() => (collection === 'course' ? courseBeats : famousBeats).filter((beat) => beat.level === level), [collection, level]);
-  const levelOptions = collection === 'course' ? courseLevels : famousLevels;
+  const levelOptions = levels;
 
   const playSound = useCallback((drum: Drum) => {
     const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -68,34 +161,37 @@ export default function Home() {
     const buffer = context.createBuffer(1, context.sampleRate * 0.25, context.sampleRate); const data = buffer.getChannelData(0);
     for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
     const noise = context.createBufferSource(); noise.buffer = buffer; const filter = context.createBiquadFilter();
-    filter.type = drum === 'hh' ? 'highpass' : 'bandpass'; filter.frequency.value = drum === 'hh' ? 6500 : 1700;
-    const envelope = context.createGain(); envelope.gain.setValueAtTime(drum === 'hh' ? 0.35 : 0.75, now); envelope.gain.exponentialRampToValueAtTime(0.001, now + (drum === 'hh' ? 0.07 : 0.2));
+    filter.type = drum === 'hh' || drum === 'oh' ? 'highpass' : 'bandpass'; filter.frequency.value = drum === 'oh' ? 5600 : drum === 'hh' ? 6500 : 1700;
+    const envelope = context.createGain(); envelope.gain.setValueAtTime(drum === 'hh' ? 0.35 : drum === 'oh' ? 0.42 : 0.75, now); envelope.gain.exponentialRampToValueAtTime(0.001, now + (drum === 'hh' ? 0.07 : drum === 'oh' ? 0.34 : 0.2));
     noise.connect(filter).connect(envelope).connect(gain); noise.start(now); noise.stop(now + 0.22);
   }, [volume]);
 
   const playStep = useCallback((index: number) => {
     setStep(index);
-    (Object.keys(selectedBeat.pattern) as Drum[]).forEach((drum) => { if (selectedBeat.pattern[drum][index]) playSound(drum); });
-  }, [selectedBeat, playSound]);
+    (Object.keys(selectedBeat.pattern) as Drum[]).forEach((drum) => { if (selectedBeat.pattern[drum][index] && !muted[drum]) playSound(drum); });
+  }, [selectedBeat, playSound, muted]);
 
   useEffect(() => {
     if (!playing) return;
-    let current = step < 0 ? 0 : step;
-    const tick = () => { playStep(current); current = (current + 1) % 16; };
+    const start = loopRange?.start ?? 0;
+    const end = loopRange?.end ?? 15;
+    let current = step >= start && step <= end ? step : start;
+    const tick = () => { playStep(current); current = current >= end ? start : current + 1; };
     tick(); const timer = window.setInterval(tick, 60000 / bpm / 4); return () => window.clearInterval(timer);
-  }, [playing, bpm, selectedBeat.id, playStep]);
+  }, [playing, bpm, selectedBeat.id, playStep, loopRange]);
 
   const chooseCollection = (next: 'course' | 'famous') => {
-    const nextLevel = next === 'course' ? 'Beginner' : 'Easy'; const first = next === 'course' ? courseBeats[0] : famousBeats[0];
-    setCollection(next); setLevel(nextLevel); setSelectedId(first.id); setBpm(first.bpm); setStep(-1); setPlaying(false);
+    const nextLevel: Level = 'Beginner'; const first = next === 'course' ? courseBeats[0] : famousBeats[0];
+    setCollection(next); setLevel(nextLevel); setSelectedId(first.id); setBpm(first.bpm); setStep(-1); setLoopRange(null); setPlaying(false);
   };
-  const chooseLevel = (next: CourseLevel | FamousLevel) => {
+  const chooseLevel = (next: Level) => {
     const first = (collection === 'course' ? courseBeats : famousBeats).find((beat) => beat.level === next);
-    setLevel(next); if (first) { setSelectedId(first.id); setBpm(first.bpm); } setStep(-1); setPlaying(false);
+    setLevel(next); if (first) { setSelectedId(first.id); setBpm(first.bpm); } setStep(-1); setLoopRange(null); setPlaying(false);
   };
-  const selectBeat = (beat: Beat) => { setSelectedId(beat.id); setBpm(beat.bpm); setStep(-1); setPlaying(false); };
+  const selectBeat = (beat: Beat) => { setSelectedId(beat.id); setBpm(beat.bpm); setStep(-1); setLoopRange(null); setPlaying(false); };
+  const toggleMute = (drum: Drum) => setMuted((current) => ({ ...current, [drum]: !current[drum] }));
   const hitDrum = (drum: Drum) => { playSound(drum); setManualHit(drum); window.setTimeout(() => setManualHit(null), 140); };
-  const activeDrums = playing && step >= 0 ? (Object.keys(selectedBeat.pattern) as Drum[]).filter((drum) => selectedBeat.pattern[drum][step]) : manualHit ? [manualHit] : [];
+  const activeDrums = playing && step >= 0 ? (Object.keys(selectedBeat.pattern) as Drum[]).filter((drum) => selectedBeat.pattern[drum][step] && !muted[drum]) : manualHit ? [manualHit] : [];
 
   const updateDial = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -120,7 +216,7 @@ export default function Home() {
       doc.setDrawColor(45, 45, 45); doc.setLineWidth(0.35);
       for (let line = 0; line < 5; line += 1) doc.line(staffX, staffY + line * gap, staffX + staffW, staffY + line * gap);
       doc.setFontSize(18); doc.text('4', 18, staffY + 11); doc.text('4', 18, staffY + 26);
-      const pdfY: Record<Drum, number> = { hh: staffY - 4, tom: staffY + gap, snare: staffY + gap * 2, kick: staffY + gap * 4.5 };
+      const pdfY: Record<Drum, number> = { hh: staffY - 4, oh: staffY - 4, tom: staffY + gap, snare: staffY + gap * 2, kick: staffY + gap * 4.5 };
       for (let index = 0; index < 16; index += 1) {
         const x = staffX + 9 + index * (staffW - 18) / 15;
         if (index % 4 === 0) { doc.setFontSize(7); doc.setTextColor(125, 125, 125); doc.text(String(index / 4 + 1), x - 1, staffY - 13); doc.setTextColor(35, 36, 38); }
@@ -128,7 +224,7 @@ export default function Home() {
         (Object.keys(selectedBeat.pattern) as Drum[]).forEach((drum) => {
           if (!selectedBeat.pattern[drum][index]) return;
           const y = pdfY[drum]; doc.setDrawColor(25, 25, 25); doc.setFillColor(25, 25, 25); doc.setLineWidth(0.45);
-          if (drum === 'hh') { doc.line(x - 1.7, y - 1.7, x + 1.7, y + 1.7); doc.line(x + 1.7, y - 1.7, x - 1.7, y + 1.7); }
+          if (drum === 'hh' || drum === 'oh') { doc.line(x - 1.7, y - 1.7, x + 1.7, y + 1.7); doc.line(x + 1.7, y - 1.7, x - 1.7, y + 1.7); }
           else doc.ellipse(x, y, 2.2, 1.45, 'F');
           doc.line(x + 2, y, x + 2, y - 11);
         });
@@ -149,7 +245,7 @@ export default function Home() {
         <div className="library-switch"><button className={collection === 'course' ? 'active' : ''} onClick={() => chooseCollection('course')}>Practice course</button><button className={collection === 'famous' ? 'active' : ''} onClick={() => chooseCollection('famous')}>Famous grooves</button></div>
         <div className="level-tabs">{levelOptions.map((option) => <button className={level === option ? 'active' : ''} key={option} onClick={() => chooseLevel(option)}>{option}</button>)}</div>
         <div className="panel-heading"><p>{collection === 'course' ? `${level} beats` : `${level} classics`}</p><span>{visibleBeats.length} tracks</span></div>
-        <nav className="beat-list" aria-label="Drum beat library">{visibleBeats.map((beat, index) => <button className={`beat-card ${beat.id === selectedId ? 'selected' : ''}`} key={beat.id} onClick={() => selectBeat(beat)}><span className="beat-number">{String(index + 1).padStart(2, '0')}</span><span className="beat-copy"><strong>{beat.title}</strong><small>{beat.style} · {beat.level}</small></span><ChevronRight size={16} /></button>)}</nav>
+        <nav className="beat-list" aria-label="Drum beat library">{visibleBeats.map((beat, index) => <button className={'beat-card ' + (beat.id === selectedId ? 'selected' : '')} key={beat.id} onClick={() => selectBeat(beat)}><span className="beat-number">{String(index + 1).padStart(2, '0')}</span><span className="beat-copy"><strong>{beat.title}</strong>{beat.artist && <em>{beat.artist}</em>}<small>{beat.style} · {beat.level}</small></span><ChevronRight size={16} /></button>)}</nav>
         <div className="console-screen"><small>NOW PRACTICING</small><strong>{bpm}<em>BPM</em></strong><span>{selectedBeat.title.toUpperCase()}</span></div>
         <div className="dial-block">
           <div className="dial interactive" role="slider" aria-label="Tempo dial" aria-valuemin={50} aria-valuemax={150} aria-valuenow={bpm} tabIndex={0} style={{ '--dial': `${((bpm - 50) / 100) * 270 - 135}deg` } as React.CSSProperties} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); updateDial(event); }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateDial(event); }} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowRight') setBpm((value) => Math.min(150, value + 1)); if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') setBpm((value) => Math.max(50, value - 1)); }}><span /></div>
@@ -160,21 +256,22 @@ export default function Home() {
       </aside>
 
       <section className="workspace">
-        <header className="topbar"><div><p className="eyebrow">{collection === 'famous' ? 'FAMOUS GROOVE' : `${selectedBeat.level.toUpperCase()} COURSE`} / {selectedBeat.style.toUpperCase()}</p><h1>{selectedBeat.title}</h1><p>{selectedBeat.subtitle}</p></div><div className="header-actions"><span className={`status-light ${playing ? 'on' : ''}`}><i />{playing ? 'Playing' : 'Ready'}</span><Button className="print-button" variant="outline" disabled={pdfBusy} onClick={exportPdf}><Download /> {pdfBusy ? 'Creating PDF...' : 'Open score PDF'}</Button></div></header>
+        <header className="topbar"><div><p className="eyebrow">{collection === 'famous' ? 'FAMOUS GROOVE' : selectedBeat.level.toUpperCase() + ' COURSE'} / {selectedBeat.style.toUpperCase()}</p><h1>{selectedBeat.title}</h1>{selectedBeat.artist && <span className="artist-line">by {selectedBeat.artist}</span>}<p>{selectedBeat.subtitle}</p></div><div className="header-actions"><span className={'status-light ' + (playing ? 'on' : '')}><i />{playing ? 'Playing' : 'Ready'}</span><Button className="print-button" variant="outline" disabled={pdfBusy} onClick={exportPdf}><Download /> {pdfBusy ? 'Creating PDF...' : 'Open score PDF'}</Button></div></header>
         <div className="content-grid">
           <section className="score-card">
-            <div className="section-title"><div><span>Partiture</span><h2>Read and scrub the groove</h2></div><button className="key-button" onClick={() => setHelpOpen(true)}>Notation key</button></div>
-            <Score beat={{ ...selectedBeat, bpm }} step={step} onScrub={(index) => { setPlaying(false); playStep(index); }} />
-            <div className="transport"><Button size="icon-lg" className="play-button" aria-label={playing ? 'Pause beat' : 'Play beat'} onClick={() => setPlaying((value) => !value)}>{playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}</Button><div className="transport-copy"><strong>{playing ? 'Keep it steady' : 'Listen, scrub, then play'}</strong><span>{playing ? `Count ${Math.floor(Math.max(step, 0) / 4) + 1}` : 'Drag the orange cursor to audition notes'}</span></div><div className="progress-track" aria-hidden="true"><span style={{ width: `${step < 0 ? 0 : ((step + 1) / 16) * 100}%` }} /></div><Volume2 size={18} /><input className="volume-range" aria-label="Volume" type="range" min="0" max="100" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /></div>
+            <div className="section-title"><div><span>Partiture</span><h2>Read, isolate, and loop the groove</h2></div><button className="key-button" onClick={() => setHelpOpen(true)}>Notation key</button></div>
+            <Score beat={{ ...selectedBeat, bpm }} step={step} muted={muted} loopRange={loopRange} onToggleMute={toggleMute} onLoopChange={setLoopRange} onScrub={(index) => { setPlaying(false); playStep(index); }} />
+            <div className="beat-guide"><div><span>ABOUT THIS BEAT</span><p>{selectedBeat.subtitle}</p></div><div><span>HOW TO PLAY IT</span><p>{selectedBeat.technique}</p></div></div>
+            <div className="transport"><Button size="icon-lg" className="play-button" data-loop-safe="true" aria-label={playing ? 'Pause beat' : 'Play beat'} onClick={() => setPlaying((value) => !value)}>{playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}</Button><div className="transport-copy"><strong>{playing ? 'Keep it steady' : 'Listen, scrub, then play'}</strong><span>{playing ? `Count ${Math.floor(Math.max(step, 0) / 4) + 1}` : 'Drag the orange cursor to audition notes'}</span></div><div className="progress-track" aria-hidden="true"><span style={{ width: `${step < 0 ? 0 : ((step + 1) / 16) * 100}%` }} /></div><Volume2 size={18} /><input className="volume-range" aria-label="Volume" type="range" min="0" max="100" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /></div>
           </section>
           <section className="kit-card">
             <div className="section-title"><div><span>Drum map</span><h2>See what to play</h2></div><span className="tap-note">Tap a drum</span></div>
-            <div className="kit-visual"><img src="https://commons.wikimedia.org/wiki/Special:Redirect/file/Drums%20in%20the%20studio%20from%20above.jpg?width=1200" alt="Standard acoustic drum kit viewed from above" /><div className="kit-shade" /><button aria-label="Play hi-hat" className={`hotspot hh ${activeDrums.includes('hh') ? 'active' : ''}`} onClick={() => hitDrum('hh')}><span>Hi-hat</span></button><button aria-label="Play high tom" className={`hotspot tom ${activeDrums.includes('tom') ? 'active' : ''}`} onClick={() => hitDrum('tom')}><span>High tom</span></button><button aria-label="Play snare" className={`hotspot snare ${activeDrums.includes('snare') ? 'active' : ''}`} onClick={() => hitDrum('snare')}><span>Snare</span></button><button aria-label="Play kick" className={`hotspot kick ${activeDrums.includes('kick') ? 'active' : ''}`} onClick={() => hitDrum('kick')}><span>Kick</span></button></div>
+            <div className="kit-visual"><img src="https://commons.wikimedia.org/wiki/Special:Redirect/file/Drums%20in%20the%20studio%20from%20above.jpg?width=1200" alt="Standard acoustic drum kit viewed from above" /><div className="kit-shade" /><button aria-label="Play hi-hat" className={`hotspot hh ${(activeDrums.includes('hh') || activeDrums.includes('oh')) ? 'active' : ''}`} onClick={() => hitDrum('hh')}><span>Hi-hat</span></button><button aria-label="Play high tom" className={`hotspot tom ${activeDrums.includes('tom') ? 'active' : ''}`} onClick={() => hitDrum('tom')}><span>High tom</span></button><button aria-label="Play snare" className={`hotspot snare ${activeDrums.includes('snare') ? 'active' : ''}`} onClick={() => hitDrum('snare')}><span>Snare</span></button><button aria-label="Play kick" className={`hotspot kick ${activeDrums.includes('kick') ? 'active' : ''}`} onClick={() => hitDrum('kick')}><span>Kick</span></button></div>
             <div className="hit-readout"><Headphones size={18} /><div><span>PLAYING NOW</span><strong>{activeDrums.length ? activeDrums.map((drum) => drumLabels[drum]).join(' + ') : 'Watch the kit light up'}</strong></div></div><small className="photo-credit">Photo: Shixart1985 / Wikimedia Commons · CC BY 2.0</small>
           </section>
         </div>
       </section>
-      {helpOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setHelpOpen(false)}><section className="guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-title" onMouseDown={(event) => event.stopPropagation()}><Button size="icon-sm" variant="ghost" className="modal-close" onClick={() => setHelpOpen(false)} aria-label="Close guide"><X /></Button><span className="eyebrow">QUICK GUIDE</span><h2 id="guide-title">How to read this beat</h2><p>Read from left to right. Drag anywhere across the score to hear that slice. Instruments stacked vertically are played together.</p><div className="legend-grid"><div><b>×</b><span><strong>Hi-hat</strong><small>Top line</small></span></div><div><b>●</b><span><strong>Snare</strong><small>Middle line</small></span></div><div><b>●</b><span><strong>Kick</strong><small>Bottom space</small></span></div><div><b>●</b><span><strong>Tom</strong><small>Upper space</small></span></div></div><p className="guide-tip">Tip: start slowly, scrub difficult moments, and raise the tempo only when every hit feels relaxed.</p></section></div>}
+      {helpOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setHelpOpen(false)}><section className="guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-title" onMouseDown={(event) => event.stopPropagation()}><Button size="icon-sm" variant="ghost" className="modal-close" onClick={() => setHelpOpen(false)} aria-label="Close guide"><X /></Button><span className="eyebrow">QUICK GUIDE</span><h2 id="guide-title">How to read this beat</h2><p>Read left to right. Click a slice to hear it, or drag across several slices to create a repeating loop. Use the speaker controls to mute individual instruments.</p><div className="legend-grid"><div><b>× / ○</b><span><strong>Closed / open hi-hat</strong><small>Top line</small></span></div><div><b>●</b><span><strong>Snare</strong><small>Middle line</small></span></div><div><b>●</b><span><strong>Kick</strong><small>Bottom space</small></span></div><div><b>●</b><span><strong>Tom</strong><small>Upper space</small></span></div></div><p className="guide-tip">Tip: mute one track at a time, loop a difficult phrase, and add each limb back only when the groove feels relaxed.</p></section></div>}
     </main>
   );
 }
