@@ -27,6 +27,7 @@ const artists: Record<string, string> = {
   'Rosanna Shuffle': 'Toto',
   'Fool in the Rain': 'Led Zeppelin',
   'Funky Drummer': 'James Brown',
+  'Youth of the Nation': 'P.O.D.',
   Everlong: 'Foo Fighters',
 };
 
@@ -37,6 +38,7 @@ const openHatPatterns: Record<string, string> = {
 };
 
 const techniqueFor = (id: string, title: string, level: Beat['level'], style: string) => {
+  if (id === 'f13') return 'Play the steady hi-hat with the right hand, the snare and tom accents with the left, and the syncopated kick with one pedal. Sit slightly behind the click and keep the notes heavy but unforced.';
   if (id === 'b09') return 'Right hand plays closed hats; lift the left foot for each open-circle note, then close crisply on the next hit. Left hand stays on snare; use one kick pedal.';
   if (id === 'm03') return 'Keep quarter notes with the right hand and open the hi-hat with the left foot on every offbeat. Close it tightly on the next downbeat; use one kick pedal.';
   if (id === 'a02') return 'Alternate R-L on the hats and lift the left foot briefly for each open accent. Start with one kick pedal; add double pedals only after the hand pattern is even.';
@@ -107,6 +109,7 @@ export const famousBeats: Beat[] = [
   beat('f06','Come Together','Laid-back tom-led pocket','Intermediate','famous','Rock',82,'x---x---x---x---','--------x-------','x-----------x---','--xx--x---xx--x-'),
   beat('f07','Sunday Bloody Sunday','March-like snare and kick conversation','Intermediate','famous','Rock',103,'x-x-x-x-x-x-x-x-','--x---x---x---x-','x---x---x---x---'),
   beat('f08','When the Levee Breaks','Huge half-time weight and space','Intermediate','famous','Rock',72,'x-x-x-x-x-x-x-x-','--------x-------','x--x--x-----x---'),
+  beat('f13','Youth of the Nation',"A practice-friendly take on Wuv Bernardo's laid-back, syncopated riff",'Intermediate','famous','Nu Metal',98,'x-x-x-x-x-x-x-x-','----x-------x---','x-----x-x--x----','--x-----x---x---'),
   beat('f09','Rosanna Shuffle','A demanding half-time shuffle feel','Advanced','famous','Shuffle',84,'x-xx-xx-x-xx-xx-','--x-x---x--x-x--','x----x--x--x-x--'),
   beat('f10','Fool in the Rain','Loose triplet feel with ghosted detail','Advanced','famous','Shuffle',96,'x-xx-xx-x-xx-xx-','--x-x---x--x-x--','x------xx--x----'),
   beat('f11','Funky Drummer','Syncopated funk vocabulary and ghost notes','Advanced','famous','Funk',100,'xxxxxxxxxxxxxxxx','--x-x--x--xx-x--','x--x----x-x--x--'),
