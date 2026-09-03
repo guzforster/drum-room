@@ -1,16 +1,19 @@
 export type Drum = 'hh' | 'oh' | 'snare' | 'kick' | 'tom';
+export type Pattern = Record<Drum, number[]>;
+export type SongSection = { name: string; bars: number; pattern: Pattern; note?: string };
 export type Level = 'Beginner' | 'Intermediate' | 'Advanced';
 export type Beat = {
   id: string;
   title: string;
   subtitle: string;
   level: Level;
-  collection: 'course' | 'famous';
+  collection: 'course' | 'famous' | 'songs';
   style: string;
   bpm: number;
   artist?: string;
   technique: string;
-  pattern: Record<Drum, number[]>;
+  pattern: Pattern;
+  sections?: SongSection[];
 };
 
 const hits = (value: string) =>
@@ -116,5 +119,77 @@ export const famousBeats: Beat[] = [
   beat('f12','Everlong','Fast sixteenth-note rock endurance','Advanced','famous','Rock',158,'xxxxxxxxxxxxxxxx','----x-------x---','x-x--xx-x-x--xx-'),
 ];
 
-export const allBeats = [...courseBeats, ...famousBeats];
+
+const songPattern = (hh: string, snare: string, kick: string, tom = '----------------', oh = '----------------'): Pattern => ({
+  hh: hits(hh), oh: hits(oh), snare: hits(snare), kick: hits(kick), tom: hits(tom),
+});
+
+const songSection = (name: string, bars: number, hh: string, snare: string, kick: string, tom = '----------------', oh = '----------------', note?: string): SongSection => ({
+  name, bars, pattern: songPattern(hh, snare, kick, tom, oh), note,
+});
+
+const completeSong = (id: string, title: string, subtitle: string, level: Level, style: string, bpm: number, technique: string, sections: SongSection[]): Beat => ({
+  id, title, subtitle, level, collection: 'songs', style, bpm, technique, sections, pattern: sections[0].pattern,
+});
+
+export const completeSongs: Beat[] = [
+  completeSong('s01', 'Encore #1', 'A beginner concert-style chart adapted from your uploaded Hal Leonard page', 'Beginner', 'Method Book', 80,
+    'Right hand leads the hi-hat, left hand plays snare, and right foot handles the kick. Observe the accented crashes, count every rest, and use R-L-R-L for the short fills.',
+    [
+      songSection('Intro', 8, 'x---x---x---x---', '----------------', 'x---x---x---x---', '------------xxxx', '----------------', 'Quarter-note setup, then a short fill.'),
+      songSection('A - Verse', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x-----x-x-----x-', '------------xxxx', '----------------', 'Keep the groove even and finish with four alternating strokes.'),
+      songSection('B - Chorus', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x---x-x-x---x-x-', '----------x-xxxx', '----------------', 'Play stronger dynamics and prepare the ending fill.'),
+      songSection('C - Bridge', 4, 'x-x-x-x-x-x-x-x-', '--------x-------', 'x-----x-----x---', '--------x-x-x-x-', '----------------', 'Drop to a softer half-time feel before building.'),
+      songSection('D - Chorus', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x---x-x-x---x-x-', '------------xxxx', '----------------', 'Return to the full chorus groove.'),
+      songSection('E - Outro', 4, 'x---x---x---x---', '----x-------x---', 'x-------x-------', '----------xxxxxx', '----------------', 'Count the rests and land the final accent together.'),
+    ]),
+  completeSong('s02', 'First Set', 'A compact beginner song for learning form without losing the backbeat', 'Beginner', 'Rock', 88,
+    'Right hand stays on closed hi-hat, left hand on snare, right foot on one kick pedal. Say the section names aloud and make the chorus slightly louder than the verse.',
+    [
+      songSection('Count-in', 2, 'x---x---x---x---', '----------------', 'x---------------'),
+      songSection('Verse', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x-------x-------'),
+      songSection('Chorus', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x---x-x-x---x---'),
+      songSection('Verse 2', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x-----x-x-------'),
+      songSection('Final Chorus', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x---x-x-x---x---', '------------xxxx'),
+    ]),
+  completeSong('s03', 'Pocket Journey', 'An intermediate pop-rock arrangement with syncopated kicks and compact fills', 'Intermediate', 'Pop Rock', 102,
+    'Lead eighth notes with the right hand and keep the left ready for snare accents. Use one kick pedal, isolate the syncopated bass-drum notes, and alternate R-L through fills.',
+    [
+      songSection('Intro', 4, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x-------x--x----'),
+      songSection('Verse', 12, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x-x---x-x--x--x-'),
+      songSection('Pre-Chorus', 4, 'xxxxxxxxxxxxxxxx', '----x-------x---', 'x--x----x-x--x--'),
+      songSection('Chorus', 12, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x--x--x-x-x---x-'),
+      songSection('Bridge', 4, 'x-x-x-x---------', '----x---x-------', 'x-------x-------', '----------x-xxxx'),
+      songSection('Final Chorus', 12, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x--x--x-x-x---x-'),
+    ]),
+  completeSong('s04', 'Open Roads', 'An intermediate arrangement centered on controlled open and closed hi-hats', 'Intermediate', 'Alternative', 96,
+    'Play closed hats with the right hand and open them with the left foot on the open-circle notes. Close on the following downbeat, keep the left hand on snare, and use one kick pedal.',
+    [
+      songSection('Intro', 4, 'x-x-x---x-x-x---', '----x-------x---', 'x-------x-------', '----------------', '------x-------x-'),
+      songSection('Verse', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x--x----x--x----'),
+      songSection('Chorus', 8, 'x---x---x---x---', '----x-------x---', 'x---x---x---x---', '----------------', '--x---x---x---x-'),
+      songSection('Breakdown', 4, 'x-x-x---x-x-x---', '--------x-------', 'x-----x-----x---', '----------------', '------x-------x-'),
+      songSection('Final Chorus', 12, 'x---x---x---x---', '----x-------x---', 'x---x---x---x---', '------------xxxx', '--x---x---x---x-'),
+    ]),
+  completeSong('s05', 'Independence Circuit', 'An advanced full-form workout for layered hands, feet, and dynamics', 'Advanced', 'Fusion', 118,
+    'Alternate R-L across continuous sixteenths, keep the left hand available for snare accents, and use one pedal until clean. Add double pedals only in the final section.',
+    [
+      songSection('Theme', 8, 'xxxx-xxxx-xxxx-xx', '---x--x----x-x--', 'x----x-x-x----x-'),
+      songSection('Development', 12, 'x-xx-x-xx-xx-x-x', '----x-------x---', 'x--x--x---x--x--'),
+      songSection('Linear Break', 8, 'x-x---x-x-x---x-', '----x-------x-x-', 'x--x--x-x--x--x-', '-------x-------x'),
+      songSection('Half-Time', 8, 'x-xx-xx-x-xx-xx-', '--------x-------', 'x----x--x--x-x--'),
+      songSection('Double-Pedal Finale', 12, 'xxxxxxxxxxxxxxxx', '----x-------x---', 'x-xxx-xxx-xxx-xx', '------------xxxx'),
+    ]),
+  completeSong('s06', 'Progressive Run', 'An advanced arrangement of changing accents, fills, and endurance sections', 'Advanced', 'Progressive Rock', 132,
+    'Alternate hands on the sixteenth-note passages, lead fills R-L-R-L, and keep snare accents above ghost notes. Use double pedals in the drive sections, then return to one pedal for the fills.',
+    [
+      songSection('Opening Figure', 8, 'xxxx-xxxx-xxxx-xx', '---x--x----x-x--', 'x----x-x-x----x-'),
+      songSection('Drive', 12, 'xxxxxxxxxxxxxxxx', '----x-------x---', 'x-xxx-xxx-xxx-xx'),
+      songSection('Tom Theme', 8, 'x-x-x-x-x-x-x-x-', '----x-------x---', 'x-------x-------', '--x---x---x---x-'),
+      songSection('Quiet Build', 8, 'x--xx-x-x--xx-x-', '------x-----x--x', 'x---------x-----'),
+      songSection('Final Run', 12, 'xxxxxxxxxxxxxxxx', '--x-x--x--x-x-x-', 'x--x---xx--x--x-', '---------xxxxxxx'),
+    ]),
+];
+
+export const allBeats = [...courseBeats, ...famousBeats, ...completeSongs];
 
