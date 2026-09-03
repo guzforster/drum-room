@@ -3,12 +3,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, CircleHelp, Download, Headphones, Pause, Play, RotateCcw, Volume2, VolumeX, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { allBeats, courseBeats, famousBeats, type Beat, type Drum, type Level } from './beats';
+import { allBeats, completeSongs, courseBeats, famousBeats, type Beat, type Drum, type Level, type Pattern } from './beats';
 import './enhancements.css';
 
 const drumLabels: Record<Drum, string> = { hh: 'Closed hi-hat', oh: 'Open hi-hat', snare: 'Snare', kick: 'Kick', tom: 'High tom' };
 const noteY: Record<Drum, number> = { hh: 18, oh: 18, tom: 35, snare: 53, kick: 79 };
 const levels: Level[] = ['Beginner', 'Intermediate', 'Advanced'];
+type Library = 'course' | 'famous' | 'songs';
+type TimelineBar = { section: string; sectionIndex: number; sectionBars: number; barInSection: number; pattern: Pattern };
+
+const timelineFor = (beat: Beat): TimelineBar[] => beat.sections?.flatMap((section, sectionIndex) =>
+  Array.from({ length: section.bars }, (_, barIndex) => ({
+    section: section.name,
+    sectionIndex,
+    sectionBars: section.bars,
+    barInSection: barIndex + 1,
+    pattern: section.pattern,
+  })),
+) ?? [{ section: 'Groove', sectionIndex: 0, sectionBars: 1, barInSection: 1, pattern: beat.pattern }];
 
 type LoopRange = { start: number; end: number };
 
@@ -128,10 +140,11 @@ function Score({
 }
 
 export default function Home() {
-  const [collection, setCollection] = useState<'course' | 'famous'>('course');
+  const [collection, setCollection] = useState<Library>('course');
   const [level, setLevel] = useState<Level>('Beginner');
   const [selectedId, setSelectedId] = useState(courseBeats[0].id);
   const selectedBeat = allBeats.find((beat) => beat.id === selectedId) ?? courseBeats[0];
+  const timeline = useMemo(() => timelineFor(selectedBeat), [selectedBeat]);
   const [bpm, setBpm] = useState(selectedBeat.bpm);
   const [volume, setVolume] = useState(72);
   const [playing, setPlaying] = useState(false);
@@ -141,9 +154,15 @@ export default function Home() {
   const [pdfBusy, setPdfBusy] = useState(false);
   const [muted, setMuted] = useState<Record<Drum, boolean>>({ hh: false, oh: false, snare: false, kick: false, tom: false });
   const [loopRange, setLoopRange] = useState<LoopRange | null>(null);
+  const currentBarIndex = Math.min(Math.floor(Math.max(step, 0) / 16), timeline.length - 1);
+  const currentBar = timeline[currentBarIndex];
+  const currentPattern = currentBar.pattern;
+  const localStep = step < 0 ? -1 : step % 16;
+  const localLoopRange = loopRange && Math.floor(loopRange.start / 16) === currentBarIndex && Math.floor(loopRange.end / 16) === currentBarIndex ? { start: loopRange.start % 16, end: loopRange.end % 16 } : null;
+  const sectionStarts = useMemo(() => { let start = 0; return selectedBeat.sections?.map((section) => { const item = { ...section, start }; start += section.bars; return item; }) ?? []; }, [selectedBeat]);
   const audioRef = useRef<AudioContext | null>(null);
 
-  const visibleBeats = useMemo(() => (collection === 'course' ? courseBeats : famousBeats).filter((beat) => beat.level === level), [collection, level]);
+  const visibleBeats = useMemo(() => (collection === 'course' ? courseBeats : collection === 'famous' ? famousBeats : completeSongs).filter((beat) => beat.level === level), [collection, level]);
   const levelOptions = levels;
 
   const playSound = useCallback((drum: Drum) => {
@@ -167,31 +186,33 @@ export default function Home() {
   }, [volume]);
 
   const playStep = useCallback((index: number) => {
+    const bar = timeline[Math.floor(index / 16)] ?? timeline[0];
+    const slice = index % 16;
     setStep(index);
-    (Object.keys(selectedBeat.pattern) as Drum[]).forEach((drum) => { if (selectedBeat.pattern[drum][index] && !muted[drum]) playSound(drum); });
-  }, [selectedBeat, playSound, muted]);
+    (Object.keys(bar.pattern) as Drum[]).forEach((drum) => { if (bar.pattern[drum][slice] && !muted[drum]) playSound(drum); });
+  }, [timeline, playSound, muted]);
 
   useEffect(() => {
     if (!playing) return;
     const start = loopRange?.start ?? 0;
-    const end = loopRange?.end ?? 15;
+    const end = loopRange?.end ?? timeline.length * 16 - 1;
     let current = step >= start && step <= end ? step : start;
     const tick = () => { playStep(current); current = current >= end ? start : current + 1; };
     tick(); const timer = window.setInterval(tick, 60000 / bpm / 4); return () => window.clearInterval(timer);
-  }, [playing, bpm, selectedBeat.id, playStep, loopRange]);
+  }, [playing, bpm, selectedBeat.id, playStep, loopRange, timeline.length]);
 
-  const chooseCollection = (next: 'course' | 'famous') => {
-    const nextLevel: Level = 'Beginner'; const first = next === 'course' ? courseBeats[0] : famousBeats[0];
+  const chooseCollection = (next: Library) => {
+    const nextLevel: Level = 'Beginner'; const first = next === 'course' ? courseBeats[0] : next === 'famous' ? famousBeats[0] : completeSongs[0];
     setCollection(next); setLevel(nextLevel); setSelectedId(first.id); setBpm(first.bpm); setStep(-1); setLoopRange(null); setPlaying(false);
   };
   const chooseLevel = (next: Level) => {
-    const first = (collection === 'course' ? courseBeats : famousBeats).find((beat) => beat.level === next);
+    const first = (collection === 'course' ? courseBeats : collection === 'famous' ? famousBeats : completeSongs).find((beat) => beat.level === next);
     setLevel(next); if (first) { setSelectedId(first.id); setBpm(first.bpm); } setStep(-1); setLoopRange(null); setPlaying(false);
   };
   const selectBeat = (beat: Beat) => { setSelectedId(beat.id); setBpm(beat.bpm); setStep(-1); setLoopRange(null); setPlaying(false); };
   const toggleMute = (drum: Drum) => setMuted((current) => ({ ...current, [drum]: !current[drum] }));
   const hitDrum = (drum: Drum) => { playSound(drum); setManualHit(drum); window.setTimeout(() => setManualHit(null), 140); };
-  const activeDrums = playing && step >= 0 ? (Object.keys(selectedBeat.pattern) as Drum[]).filter((drum) => selectedBeat.pattern[drum][step] && !muted[drum]) : manualHit ? [manualHit] : [];
+  const activeDrums = playing && step >= 0 ? (Object.keys(currentPattern) as Drum[]).filter((drum) => currentPattern[drum][localStep] && !muted[drum]) : manualHit ? [manualHit] : [];
 
   const updateDial = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -221,8 +242,8 @@ export default function Home() {
         const x = staffX + 9 + index * (staffW - 18) / 15;
         if (index % 4 === 0) { doc.setFontSize(7); doc.setTextColor(125, 125, 125); doc.text(String(index / 4 + 1), x - 1, staffY - 13); doc.setTextColor(35, 36, 38); }
         if (index > 0 && index % 4 === 0) { doc.setLineWidth(0.6); doc.line(x - 7, staffY, x - 7, staffY + gap * 4); }
-        (Object.keys(selectedBeat.pattern) as Drum[]).forEach((drum) => {
-          if (!selectedBeat.pattern[drum][index]) return;
+        (Object.keys(currentPattern) as Drum[]).forEach((drum) => {
+          if (!currentPattern[drum][index]) return;
           const y = pdfY[drum]; doc.setDrawColor(25, 25, 25); doc.setFillColor(25, 25, 25); doc.setLineWidth(0.45);
           if (drum === 'hh' || drum === 'oh') { doc.line(x - 1.7, y - 1.7, x + 1.7, y + 1.7); doc.line(x + 1.7, y - 1.7, x - 1.7, y + 1.7); }
           else doc.ellipse(x, y, 2.2, 1.45, 'F');
@@ -233,6 +254,37 @@ export default function Home() {
       doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.text('NOTATION KEY', 16, 145); doc.setFont('helvetica', 'normal'); doc.setTextColor(85, 85, 85);
       doc.text('x  Hi-hat', 16, 154); doc.text('-  High tom', 62, 154); doc.text('-  Snare', 116, 154); doc.text('-  Kick', 160, 154);
       doc.setTextColor(241, 83, 29); doc.setFont('helvetica', 'bold'); doc.text('DRUM ROOM', 16, 190); doc.setTextColor(110, 110, 110); doc.setFont('helvetica', 'normal'); doc.text('Practice slowly. Keep your strokes relaxed. Raise the tempo only when the groove feels steady.', 42, 190);
+      if (selectedBeat.sections) {
+        doc.addPage('a4', 'landscape');
+        doc.setFillColor(45, 54, 73); doc.rect(0, 0, 297, 24, 'F');
+        doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text(selectedBeat.title + ' - COMPLETE ARRANGEMENT', 15, 15);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(timeline.length + ' BARS / ' + selectedBeat.sections.length + ' SECTIONS / ' + bpm + ' BPM', 282, 15, { align: 'right' });
+        let rowY = 34;
+        selectedBeat.sections.forEach((section, sectionIndex) => {
+          doc.setTextColor(241, 83, 29); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text(String(sectionIndex + 1).padStart(2, '0') + '  ' + section.name.toUpperCase(), 15, rowY + 4);
+          doc.setTextColor(95, 95, 95); doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.text(section.bars + ' bars', 15, rowY + 10);
+          const miniX = 62, miniW = 215, miniGap = 3;
+          doc.setDrawColor(65, 65, 65); doc.setLineWidth(0.22);
+          for (let line = 0; line < 5; line += 1) doc.line(miniX, rowY + line * miniGap, miniX + miniW, rowY + line * miniGap);
+          const miniY: Record<Drum, number> = { hh: rowY - 2, oh: rowY - 2, tom: rowY + miniGap, snare: rowY + miniGap * 2, kick: rowY + miniGap * 4.5 };
+          for (let index = 0; index < 16; index += 1) {
+            const x = miniX + 7 + index * (miniW - 14) / 15;
+            (Object.keys(section.pattern) as Drum[]).forEach((drum) => {
+              if (!section.pattern[drum][index]) return;
+              const y = miniY[drum]; doc.setDrawColor(25, 25, 25); doc.setFillColor(25, 25, 25); doc.setLineWidth(0.3);
+              if (drum === 'hh') { doc.line(x - 1.1, y - 1.1, x + 1.1, y + 1.1); doc.line(x + 1.1, y - 1.1, x - 1.1, y + 1.1); }
+              else if (drum === 'oh') doc.circle(x, y, 1.2, 'S');
+              else doc.ellipse(x, y, 1.5, 0.9, 'F');
+              doc.line(x + 1.3, y, x + 1.3, y - 6);
+            });
+          }
+          if (section.note) { doc.setTextColor(105, 105, 105); doc.setFontSize(6.5); doc.text(section.note, miniX, rowY + 17); }
+          rowY += 27;
+        });
+        doc.setDrawColor(205, 205, 202); doc.line(15, 198, 282, 198);
+        doc.setTextColor(241, 83, 29); doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.text('PLAYING GUIDE', 15, 205);
+        doc.setTextColor(90, 90, 90); doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.text(doc.splitTextToSize(selectedBeat.technique, 225), 47, 204);
+      }
       const url = URL.createObjectURL(doc.output('blob')); pdfTab.location.href = url; window.setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch { pdfTab.close(); window.alert('The PDF could not be created. Please try again.'); }
     finally { setPdfBusy(false); }
@@ -242,9 +294,9 @@ export default function Home() {
     <main className="app-shell">
       <aside className="groove-panel">
         <div className="brand-lockup"><span className="brand-mark">DR</span><div><strong>Drum Room</strong><small>Practice Studio</small></div></div>
-        <div className="library-switch"><button className={collection === 'course' ? 'active' : ''} onClick={() => chooseCollection('course')}>Practice course</button><button className={collection === 'famous' ? 'active' : ''} onClick={() => chooseCollection('famous')}>Famous grooves</button></div>
+        <div className="library-switch"><button className={collection === 'course' ? 'active' : ''} onClick={() => chooseCollection('course')}>Practice course</button><button className={collection === 'famous' ? 'active' : ''} onClick={() => chooseCollection('famous')}>Famous grooves</button><button className={collection === 'songs' ? 'active' : ''} onClick={() => chooseCollection('songs')}>Complete songs</button></div>
         <div className="level-tabs">{levelOptions.map((option) => <button className={level === option ? 'active' : ''} key={option} onClick={() => chooseLevel(option)}>{option}</button>)}</div>
-        <div className="panel-heading"><p>{collection === 'course' ? `${level} beats` : `${level} classics`}</p><span>{visibleBeats.length} tracks</span></div>
+        <div className="panel-heading"><p>{collection === 'course' ? level + ' beats' : collection === 'famous' ? level + ' classics' : level + ' songs'}</p><span>{visibleBeats.length} tracks</span></div>
         <nav className="beat-list" aria-label="Drum beat library">{visibleBeats.map((beat, index) => <button className={'beat-card ' + (beat.id === selectedId ? 'selected' : '')} key={beat.id} onClick={() => selectBeat(beat)}><span className="beat-number">{String(index + 1).padStart(2, '0')}</span><span className="beat-copy"><strong>{beat.title}</strong>{beat.artist && <em>{beat.artist}</em>}<small>{beat.style} · {beat.level}</small></span><ChevronRight size={16} /></button>)}</nav>
         <div className="console-screen"><small>NOW PRACTICING</small><strong>{bpm}<em>BPM</em></strong><span>{selectedBeat.title.toUpperCase()}</span></div>
         <div className="dial-block">
@@ -256,13 +308,14 @@ export default function Home() {
       </aside>
 
       <section className="workspace">
-        <header className="topbar"><div><p className="eyebrow">{collection === 'famous' ? 'FAMOUS GROOVE' : selectedBeat.level.toUpperCase() + ' COURSE'} / {selectedBeat.style.toUpperCase()}</p><h1>{selectedBeat.title}</h1>{selectedBeat.artist && <span className="artist-line">by {selectedBeat.artist}</span>}<p>{selectedBeat.subtitle}</p></div><div className="header-actions"><span className={'status-light ' + (playing ? 'on' : '')}><i />{playing ? 'Playing' : 'Ready'}</span><Button className="print-button" variant="outline" disabled={pdfBusy} onClick={exportPdf}><Download /> {pdfBusy ? 'Creating PDF...' : 'Open score PDF'}</Button></div></header>
+        <header className="topbar"><div><p className="eyebrow">{collection === 'famous' ? 'FAMOUS GROOVE' : collection === 'songs' ? 'COMPLETE SONG' : selectedBeat.level.toUpperCase() + ' COURSE'} / {selectedBeat.style.toUpperCase()}</p><h1>{selectedBeat.title}</h1>{selectedBeat.artist && <span className="artist-line">by {selectedBeat.artist}</span>}<p>{selectedBeat.subtitle}</p></div><div className="header-actions"><span className={'status-light ' + (playing ? 'on' : '')}><i />{playing ? 'Playing' : 'Ready'}</span><Button className="print-button" variant="outline" disabled={pdfBusy} onClick={exportPdf}><Download /> {pdfBusy ? 'Creating PDF...' : 'Open score PDF'}</Button></div></header>
         <div className="content-grid">
           <section className="score-card">
             <div className="section-title"><div><span>Partiture</span><h2>Read, isolate, and loop the groove</h2></div><button className="key-button" onClick={() => setHelpOpen(true)}>Notation key</button></div>
-            <Score beat={{ ...selectedBeat, bpm }} step={step} muted={muted} loopRange={loopRange} onToggleMute={toggleMute} onLoopChange={setLoopRange} onScrub={(index) => { setPlaying(false); playStep(index); }} />
+            {selectedBeat.sections && <div className="song-arrangement"><div className="arrangement-heading"><span>SONG MAP</span><strong>{timeline.length} bars · {sectionStarts.length} sections</strong></div><div className="section-strip">{sectionStarts.map((section, index) => <button key={section.name} className={currentBar.sectionIndex === index ? 'active' : ''} onClick={() => { setPlaying(false); setLoopRange(null); setStep(section.start * 16); }}><b>{section.name}</b><small>{section.bars} bars</small></button>)}</div><div className="bar-navigator"><button disabled={currentBarIndex === 0} onClick={() => { setPlaying(false); setLoopRange(null); setStep(Math.max(0, currentBarIndex - 1) * 16); }}>Previous bar</button><span>{currentBar.section} · bar {currentBar.barInSection} of {currentBar.sectionBars} · song bar {currentBarIndex + 1} of {timeline.length}</span><button disabled={currentBarIndex === timeline.length - 1} onClick={() => { setPlaying(false); setLoopRange(null); setStep(Math.min(timeline.length - 1, currentBarIndex + 1) * 16); }}>Next bar</button></div></div>}
+            <Score beat={{ ...selectedBeat, bpm, pattern: currentPattern }} step={localStep} muted={muted} loopRange={localLoopRange} onToggleMute={toggleMute} onLoopChange={(range) => setLoopRange(range ? { start: currentBarIndex * 16 + range.start, end: currentBarIndex * 16 + range.end } : null)} onScrub={(index) => { setPlaying(false); playStep(currentBarIndex * 16 + index); }} />
             <div className="beat-guide"><div><span>ABOUT THIS BEAT</span><p>{selectedBeat.subtitle}</p></div><div><span>HOW TO PLAY IT</span><p>{selectedBeat.technique}</p></div></div>
-            <div className="transport"><Button size="icon-lg" className="play-button" data-loop-safe="true" aria-label={playing ? 'Pause beat' : 'Play beat'} onClick={() => setPlaying((value) => !value)}>{playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}</Button><div className="transport-copy"><strong>{playing ? 'Keep it steady' : 'Listen, scrub, then play'}</strong><span>{playing ? `Count ${Math.floor(Math.max(step, 0) / 4) + 1}` : 'Drag the orange cursor to audition notes'}</span></div><div className="progress-track" aria-hidden="true"><span style={{ width: `${step < 0 ? 0 : ((step + 1) / 16) * 100}%` }} /></div><Volume2 size={18} /><input className="volume-range" aria-label="Volume" type="range" min="0" max="100" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /></div>
+            <div className="transport"><Button size="icon-lg" className="play-button" data-loop-safe="true" aria-label={playing ? 'Pause beat' : 'Play beat'} onClick={() => setPlaying((value) => !value)}>{playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}</Button><div className="transport-copy"><strong>{playing ? 'Keep it steady' : selectedBeat.sections ? 'Play the complete arrangement' : 'Listen, scrub, then play'}</strong><span>{selectedBeat.sections ? currentBar.section + ' · bar ' + currentBar.barInSection + ' of ' + currentBar.sectionBars : playing ? 'Count ' + (Math.floor(Math.max(localStep, 0) / 4) + 1) : 'Drag the orange cursor to audition notes'}</span></div><div className="progress-track" aria-hidden="true"><span style={{ width: (step < 0 ? 0 : ((step + 1) / (timeline.length * 16)) * 100) + '%' }} /></div><Volume2 size={18} /><input className="volume-range" aria-label="Volume" type="range" min="0" max="100" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /></div>
           </section>
           <section className="kit-card">
             <div className="section-title"><div><span>Drum map</span><h2>See what to play</h2></div><span className="tap-note">Tap a drum</span></div>
